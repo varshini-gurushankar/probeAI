@@ -1,32 +1,17 @@
-# ProbeAI — an AI-moderated user-research interviewer with a self-eval layer
+# ProbeAI — an AI-moderated research interviewer that grades its own work
 
-> Models Great Question's **AI Moderated Interviews**: *"the reach of a survey with the
-> depth of an interview."* A discussion-guide–driven moderator that **adapts and doesn't
-> stick to a rigid script** — it probes on response gaps, tracks objective coverage,
-> synthesizes findings, and then **grades its own interview quality**.
+ProbeAI is a small working demo I built for Great Question's AI engineering
+internship. It's a miniature of the AI Moderated Interviews feature that is included in the role's responsibilites: a moderator that runs a user-research interview from a discussion guide, asks follow-ups when an answer is thin, tracks how well it covered each objective, writes up the findings, and then scores how good the interview actually was.
 
-ProbeAI is a small, real, runnable demo built for Great Question's AI-native SWE internship.
-It targets two of the role's stated challenges head-on:
+I picked this because it lines up with two of the challenges in the role description which is a
+realtime agentic moderator (TTS/STT), evals/quality measures, and because Great
+Question's own pitch for the feature is a problem I find genuinely interesting: surveys
+scale but stay shallow, interviews go deep but don't scale, and the bet is that an AI
+moderator can get you some of both. The hard part isn't making it talk. It's making it
+interview well and knowing whether it did. That second half is where I spent most of
+my effort.
 
-1. **Realtime agentic AI moderator (TTS + STT)** — a turn-based voice interviewer.
-2. **Evals & quality measures** — a layer that scores whether the interview was *good*,
-   not just whether it finished.
-
----
-
-## The problem, in Great Question's terms
-
-Surveys scale but stay shallow; interviews go deep but don't scale. GQ's AI Moderated
-Interviews close that gap: a researcher writes a **discussion guide** (a research goal +
-prioritized **objectives**), and an AI **moderator** runs the interview — using the guide
-**as a framework, not a script**, **probing when answers need more detail**, and respecting
-topic priorities (*spend more time here; skip this if time runs short*). The thing human
-moderators still win is *reading between the lines*; the thing AI moderation wins is
-**adaptive probing based on response gaps**. ProbeAI is a faithful miniature of exactly that.
-
----
-
-## What it does (a single turn)
+## What one turn looks like
 
 ```
 Participant: "It was annoying."
@@ -36,214 +21,131 @@ Participant: "It was annoying."
 Coverage: [The moment they abandon checkout]  uncovered → partial   (evidence: turn 3)
 ```
 
-When an answer is **specific and substantive**, the objective is marked **covered** and the
-moderator moves on. When the participant **volunteers info for a later objective**, that
-objective is covered too (and never re-asked). When they **wander**, the moderator steers
-back. When objectives are covered or the **turn budget** is hit, it **wraps up gracefully**.
+If the answer is specific and substantive, the objective gets marked covered and the
+moderator moves on. If the participant volunteers something that belongs to a later
+objective, that one gets credited too and never re-asked. If they wander off, it steers
+back. Once everything's covered or the turn budget runs out, it wraps up.
 
----
+## How it's put together
 
-## Architecture
+I kept the modules separate so each piece is testable on its own.
 
-Clean, independently testable modules:
-
-| Module | Role |
+| Module | What it does |
 | --- | --- |
-| `study_config.py` | Loads + validates the discussion guide (`config/study_checkout.yaml`) and the moderation policy (`config/policy.yaml`). |
-| `moderator.py` | **The agentic engine.** `assess` (LLM) → `decide_next_action` (**pure, deterministic**) → `generate` (LLM). The decision logic is separated from the LLM so it is unit-testable. |
-| `coverage.py` | Per-objective state machine: `uncovered / partial / covered` + evidence turns. Deterministic given a verdict. |
-| `transcript.py` | Append-only, speaker-attributed log; persists to JSONL. |
-| `synthesis.py` | Findings summary + objective-linked **highlights** — every quote is verified verbatim against a real participant turn (no hallucinated quotes). |
-| `participant.py` | Simulated-participant LLM personas (solo demo + eval harness). |
-| `evals/` | `heuristics` + `judge` + `metrics` + `scenarios` + `run` (see below). |
-| `gq_mock.py` | The Great Question integration seam (see below). |
-| `server.py` + `web/` | FastAPI backend + a vanilla SPA: mic STT, TTS, live transcript, coverage panel, eval report. |
+| `study_config.py` | Loads and validates the discussion guide (`config/study_checkout.yaml`) and the policy (`config/policy.yaml`). |
+| `moderator.py` | The engine: `assess` (LLM) → `decide_next_action` (pure, deterministic) → `generate` (LLM). I pulled the decision logic out of the LLM call so it can be unit-tested. |
+| `coverage.py` | Per-objective state machine (uncovered / partial / covered) plus the evidence turns. Deterministic once it has a verdict. |
+| `transcript.py` | Speaker-attributed log, appended as it goes, saved to JSONL. |
+| `synthesis.py` | Findings summary and objective-linked highlights. Every quote is checked verbatim against a real participant turn so the synthesis can't invent one. |
+| `participant.py` | Simulated-participant personas, for solo demos and the eval harness. |
+| `evals/` | heuristics, judge, metrics, scenarios, and the runner. |
+| `gq_mock.py` | The stand-in for Great Question's API (see below). |
+| `server.py` + `web/` | FastAPI backend and a plain-JS front end: mic, voice, live transcript, coverage panel, eval report. |
 
-Prompts live in `prompts.py` so they're easy to read, diff, and tune. The moderator logs its
-**decision rationale every turn** (why it probed vs. moved on).
+Prompts all live in `prompts.py` so they're easy to find and tweak, and the moderator logs
+why it made each call (probe vs. move on) every turn, which made debugging a lot easier.
 
----
+## The moderation rules
 
-## The moderation policy (the product-sense core)
+These are baked into both the moderator prompt and the decision code:
 
-Encoded as hard constraints in the moderator prompt **and** the decision code:
+- Treat the discussion guide as a framework, not a script, cover the objectives but follow
+  the participant.
+- When an answer leaves a gap, ask one targeted follow up into that specific gap.
+- Don't over-probe. Caps are priority-weighted (below), and once something's covered, move on.
+- Never ask leading questions (no presupposition, loaded phrasing, or two questions at once).
+  The eval layer measures this separately and the target is zero.
+- One question at a time, and open/close the conversation cleanly.
 
-- **Framework, not a script** — cover objectives, but adapt order/depth to the participant.
-- **Probe on response gaps** — one targeted follow-up into the *specific* gap.
-- **Don't over-probe** — priority-weighted caps (see below); once covered, move on.
-- **Never leading** — no presupposition / loaded / double-barreled questions (separately
-  measured by the eval layer; target zero).
-- **One question at a time.**
-- **Graceful open and close.**
+Everything tunable lives in `config/policy.yaml`.
 
-All thresholds are editable in [`config/policy.yaml`](probeai/config/policy.yaml).
+## Decisions I made on purpose
 
----
+A few of these I went back and forth on, so I'll explain the reasoning:
 
-## Design decisions I own (and can defend)
+**What counts as "covered."** Three states, and "covered" means the participant gave a
+specific, substantive answer to what the objective was actually after, with the turn that
+earned it stored as evidence. "Partial" means they were on-topic but vague. I didn't want a
+throwaway mention to count as having learned something, and storing the evidence means any
+"covered" call can be checked.
 
-These were deliberate choices, not defaults:
+**When an answer is vague.** The decision to probe relies primarily on the model's assessment of whether a response is specific; response length serves only as a minor secondary signal and never triggers a probe on its own. A short answer can still be substantive. For example, "I quit at the payment screen" so length alone is an unreliable indicator.
 
-| Decision | Choice | Why |
-| --- | --- | --- |
-| **"Covered" definition** | 3 states; *covered* = **substantive + specific** answer to the objective's intent, with the participant turn stored as **evidence**; *partial* = on-topic but vague. | A vague mention shouldn't count as learning something. Evidence makes coverage auditable. |
-| **Probe thresholds** | **Priority-weighted**: high = 2 follow-ups, medium = 1, low = 0–1 and skippable when budget is low. Turn budget ≈ 3 × #objectives. | Mirrors GQ's *"spend more time here."* |
-| **"Vague" trigger** | The LLM **specificity judgment is primary**; word count is only a **weak secondary nudge**, never a standalone reason to probe. | A short answer can be substantive ("I quit at the payment screen"). |
-| **Leading-question detection** | **Hybrid**: deterministic regex/heuristics (presupposition + loaded + double-barreled) **and** an isolated LLM judge. | Defense in depth; the cheap rules are testable, the judge catches subtler presupposition. |
-| **Headline metric** | **Scenario match-accuracy** (behaves as expected on N/5 hand-labeled scenarios), with relevant-follow-up-rate and "0 leading questions" alongside. | It measures *interviewing well*, not just task completion — and the headline number is grounded in **human labels**, not an LLM. |
+**Catching leading questions.** Detection is hybrid. Deterministic regex and heuristics flag the explicit cases (presupposition, loaded phrasing, and double-barreled questions), while a separately isolated LLM judge identifies the subtler presupposition that rule-based checks cannot reliably capture.
 
----
+**The headline metric.** The primary measure is scenario match-accuracy: the extent to which the moderator's actual behavior aligns with the behavior I defined as correct for each test scenario, reported alongside the follow-up relevance rate and the leading-question count. I selected this metric so that the headline reflects the quality of the interview rather than its mere completion, and so that it remains grounded in human-defined labels rather than a model evaluating its own output.
+
+**The headline number.** Scenario match-accuracy. Does it behave the way I labeled it should
+across the test scenarios, with the follow-up relevance rate and the leading-question count
+alongside. I wanted the headline to measure interviewing well, not just finishing, and I
+wanted it grounded in my own labels rather than a model grading itself.
 
 ## The eval layer
 
-Two **deliberately separated** kinds of measurement, so a model never grades itself:
+This is the part I care most about, and I split it deliberately so a model is never grading
+its own output.
 
-### 1. Ground-truth behavioral accuracy — the headline (no LLM in the loop)
-`evals/scenarios.py` defines five adversarial personas, each with a **hand-labeled** expected
-behavior. The **scenario match-accuracy** compares the moderator's *actual* recorded behavior
-to the human label by **deterministic** check:
+**1. Behavioral accuracy (the headline, no LLM involved).** `evals/scenarios.py` has five
+adversarial participants, each with a behavior I hand-labeled as correct. The harness compares
+what the moderator actually did against my label with a plain deterministic check:
 
-| Scenario | Hand-labeled expectation |
+| Scenario | What it should do |
 | --- | --- |
-| Vague one-word answerer | Probe for specifics (≥ 1 follow-up) |
-| Volunteers later-objective info | Cover the volunteered objective; **don't re-ask** it |
-| Off-topic rambler | Steer back (≥ 1 redirect) |
-| Ideal participant (control) | Few/no probes (≤ 1) **and** ≥ 80% coverage |
-| Uncooperative "I don't know" | **Terminate gracefully** within budget; no probe-loop |
+| Vague one-word answerer | Probe for specifics (at least 1 follow-up) |
+| Volunteers later-objective info | Credit that objective, don't re-ask it |
+| Off-topic rambler | Steer back (at least 1 redirect) |
+| Ideal participant (control) | Few or no probes, and 80%+ coverage |
+| Uncooperative "I don't know" | Wrap up gracefully, don't loop |
 
-### 2. LLM-as-judge — scoped narrowly, isolated
-`evals/judge.py` scores **only follow-up relevance** ("did this follow-up dig into a real
-gap?") and offers a *second opinion* on leading questions. It runs in its **own context, on a
-different model** from the moderator (`gemini-2.5-flash` vs the moderator's `flash-lite`), at
-temperature 0. It **never** computes the headline accuracy.
+The ideal participant is a control on purpose — without it, the harness would just reward a
+moderator that probes everyone, including people who already gave good answers. The
+uncooperative one is there because the scariest failure for an agent is not knowing when to
+stop.
 
-### Run it (one command)
+**2. LLM-as-judge (narrow and isolated).** `evals/judge.py` only scores follow-up relevance
+("did this dig into a real gap?") and gives a second opinion on leading questions. It runs in
+its own context on a different model from the moderator (`gemini-2.5-flash` vs the moderator's
+`flash-lite`), at temperature 0, and it only ever sees the snippet it's judging. It never
+touches the headline number.
+
+### Running it
 
 ```bash
-python -m probeai.evals.run            # all 5 scenarios (cheap defaults — see below)
-python -m probeai.evals.run --judge    # also score follow-up relevance (extra LLM calls)
-python -m probeai.evals.run --persona  # LLM participant personas instead of fixed scripts
-python -m probeai.evals.run --rich     # full LLM generation for every moderator line
-python -m probeai.evals.run --use-cached    # re-score saved runs, zero LLM calls
+python -m probeai.evals.run            # all 5 scenarios (cheap defaults)
+python -m probeai.evals.run --judge    # also score follow-up relevance (more LLM calls)
+python -m probeai.evals.run --persona  # LLM personas instead of scripted answers
+python -m probeai.evals.run --rich     # full LLM generation for every line
+python -m probeai.evals.run --use-cached    # re-score saved runs, no LLM calls
 python -m probeai.evals.run --scenario vague_oneword
 ```
 
-**Quota-lean by default.** To run on a tight free tier, the harness defaults to: a **compact
-3-objective eval study**, **scripted participant answers** (deterministic + no participant LLM
-calls), **lean generation** (only *probes* hit the LLM; rote open/next/close lines are
-templated from the researcher's seed questions), and the **judge off**. That takes a full run
-from ~60 calls down to ~20–25. Per-scenario results are **cached** to `data/eval_runs/`, so if
-a daily quota runs out mid-run you can finish the rest after the reset and then render the full
-report with `--use-cached`. `--persona`/`--rich`/`--judge` trade calls for fidelity.
+Gemini's free tier is stingy, and the project I was on was capped at a very low shared daily request budget. So the harness runs lean by default, a compact 3-objective study, scripted answers (no participant LLM calls), and only the probes actually hit the model; the routine open/next/close lines are templated from the seed questions. 
 
-Example report **format** (run the command for live numbers from your machine):
+## Where it would plug into Great Question
 
-```
-Scenario match-accuracy (moderator behavior vs. hand-labeled expectation):
-  Vague one-word answerer     Probe for specifics (>=1 follow-up)        PASS
-  Volunteers later-objective  Cover volunteered objective; don't re-ask  PASS
-  Off-topic rambler           Steer back (>=1 redirect)                  PASS
-  Ideal participant (control) Few/no probes (<=1) and >=80% coverage     PASS
-  Uncooperative "I don't know"Terminate gracefully; no probe-loop        PASS
-  Scenario match-accuracy: 5/5 (100%)
+I made this for Great Question because rather than building something generic, I wanted to take two of the challenges from the role: the agentic moderator and evals and show I could build toward them and reason about how they'd fit your product. 
 
-  Leading questions:        0  (target: 0)
-  Stacked (double-barreled):0  (target: 0)
-  Relevant follow-up rate:  Y%
-
-HEADLINE: "Behaves as expected on 3/3 completed scenarios (100%), 0 leading
-           questions — coverage 67% (2 scenarios pending quota reset)."
-```
-
-### Evaluation limitations (read this)
-
-The moderator, the simulated participant, **and** the judge are all Gemini models — a shared
-model family is a real evaluation risk (a model may be biased toward rating its own family's
-output favorably). Mitigations, by design:
-
-1. **The headline number does not use an LLM at all.** Scenario match-accuracy is a
-   deterministic comparison of the moderator's behavior against *my* hand-written labels.
-2. **The judge is isolated** — separate client, **different model**, temperature 0, and it
-   only ever sees the snippet it's judging (never the moderator's prompt or reasoning).
-3. **The judge is scoped to relevance**, the one thing a deterministic rule can't capture.
-
-The ideal next step is a judge from a *different provider family* entirely; on a $0 free tier
-that wasn't available, so isolation-by-config is the honest compromise — stated here plainly.
-
-### Tests
-
-`pytest` covers **deterministic logic only** — coverage transitions, turn-budget/priority
-math, leading-question heuristics, scenario checks, synthesis grounding. **No assertions on
-raw LLM output** (it's stochastic); LLM behavior is exercised in the eval-harness layer.
-
-```bash
-pytest            # 61 tests, no API key required
-```
-
----
-
-## Where this plugs into Great Question (`gq_mock.py`)
-
-I don't have access to GQ's real API/MCP, so `gq_mock.py` is a thin stand-in that marks the
-exact integration seam:
-
-| `gq_mock` function | Great Question concept (production) |
-| --- | --- |
-| `get_study(study_id)` | GQ **Studies** — fetch the discussion guide |
-| `save_transcript(...)` | GQ **Interviews / Transcripts** |
-| `save_highlights(...)` | GQ **Highlights** — objective-linked quoted excerpts |
-| `save_synthesis(...)` | GQ **Insights / Analysis** |
-
-Swapping these bodies for real MCP/REST calls is the entire "productionize against Great
-Question" step.
-
----
-
-## Non-goals (explicit)
-
-- **Vision awareness** (watching a participant use a prototype) — the hardest piece; skipped.
-- **Full realtime duplex / barge-in audio** — turn-based is intentional and more reliable.
-- **Real Great Question API/MCP** — mocked via `gq_mock.py`.
-- **Recruiting, scheduling, auth, multi-tenant, persistence beyond local files.**
-
----
-
-## Setup & run
+## Setup
 
 ```bash
 # 1. Install
-python -m venv .venv && .venv/Scripts/activate        # (Windows; use source on macOS/Linux)
+python -m venv .venv && .venv/Scripts/activate     # Windows; use source on macOS/Linux
 pip install -r requirements.txt
 
-# 2. Add a free Gemini key (no credit card): https://aistudio.google.com/apikey
-cp .env.example .env        # then put your key in GEMINI_API_KEY=
+# 2. Free Gemini key (no card): https://aistudio.google.com/apikey
+cp .env.example .env        # then set GEMINI_API_KEY=
 
 # 3a. Web app (voice + UI)
-uvicorn probeai.server:app --reload     # open http://localhost:8000
+uvicorn probeai.server:app --reload     # http://localhost:8000
 
-# 3b. Or the terminal demo
-python -m probeai.cli                       # type answers yourself
-python -m probeai.runner --persona vague_oneword -v   # watch it probe a simulated participant
+# 3b. Terminal demo
+python -m probeai.cli                                  # type answers yourself
+python -m probeai.runner --persona vague_oneword -v    # watch it probe a simulated participant
 
 # 4. Evals
 python -m probeai.evals.run
 ```
 
-**Swap in a different study:** copy `probeai/config/study_checkout.yaml`, edit the research
-goal / objectives / priorities, and pass `--study path/to/your.yaml` (CLI/runner) or point
-`gq_mock.get_study` at it.
-
-### Cost & the Claude Code gotcha
-
-This app costs **$0 to run**: it calls **Gemini's free tier** only. I *built* it with Claude
-Code (covered by my Claude subscription) — note that **if `ANTHROPIC_API_KEY` is set during
-development, Claude Code bills the paid API instead of your subscription**, so keep that
-variable unset. ProbeAI itself never calls Anthropic at runtime.
-
-> **Free-tier note:** Gemini's free tier throttles aggressively. Some projects are capped at a
-> very low shared **per-day** request budget (~20/day across models). The client retries
-> transient throttles (429 per-minute / 5xx) with backoff and honors the server's stated
-> `retryDelay`, but **fails fast on per-day exhaustion** (it won't recover within a backoff
-> window). The moderator runs on `flash-lite` (more headroom) with the judge isolated on
-> `flash`; the harness defaults (scripted + lean + judge-off + compact study) plus
-> `--use-cached` keep a full run inside a tight daily budget.
+I made this with Claude Code as I was allowed to use AI to create a demo. If you have `ANTHROPIC_API_KEY` set, Claude Code will bill the paid API instead, so I kept it unset.
+ProbeAI itself never calls Anthropic, at runtime it only uses Gemini's free tier, so it costs
+nothing to run.
