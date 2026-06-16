@@ -1,0 +1,51 @@
+# =============================================================================
+# Moderation policy — the tunable thresholds that govern the agentic behavior.
+#
+# These are DESIGN DECISIONS, surfaced here (not buried in code) so they can be
+# read, diffed, and defended. See README "Moderation policy".
+# =============================================================================
+
+# --- Turn budget -------------------------------------------------------------
+# Total participant turns before the moderator must wrap up, regardless of
+# coverage. Computed as ceil(turn_budget_per_objective * <num objectives>),
+# with a floor. For a 5-objective study at 3.0 => budget of 15 participant turns.
+turn_budget_per_objective: 3.0
+turn_budget_floor: 8
+
+# --- Probe caps by priority --------------------------------------------------
+# Max follow-up probes the moderator may ask PER OBJECTIVE, by priority.
+# High-priority objectives earn more depth; low-priority ones are shallow and
+# skippable when the budget runs low. This encodes GQ's "spend more time here".
+probe_caps:
+  high: 2
+  medium: 1
+  low: 1
+
+# When the remaining turn budget is at or below this many turns, the moderator
+# stops probing low-priority objectives and may skip uncovered low-priority ones
+# entirely to make sure high-priority objectives get covered.
+low_priority_skip_threshold: 4
+
+# --- The "vague" / probe trigger ---------------------------------------------
+# IMPORTANT: specificity dominates. The LLM's specificity/substantiveness verdict
+# is the PRIMARY trigger for probing. Word count is only a WEAK SECONDARY nudge —
+# it can push a borderline answer toward "probe", but a short answer that is
+# specific ("I quit at the payment screen") must NOT be probed on length alone.
+probe_trigger:
+  # The verdict the LLM returns about the latest answer drives the decision:
+  #   "covered"  -> objective satisfied, move on
+  #   "partial"  -> on-topic but missing specifics -> probe (if cap allows)
+  #   "off_topic"-> steer back to the current objective
+  # See coverage.py / moderator.py.
+  specificity_is_primary: true
+
+  # Secondary, weak signal only. Answers at or below this word count are treated
+  # as a *nudge* toward probing a borderline ("partial") answer — never as a
+  # standalone reason to probe a "covered" one.
+  short_answer_word_count: 6
+
+# --- Closing -----------------------------------------------------------------
+# The moderator wraps up when all objectives are covered OR the turn budget is
+# hit. If only low-priority objectives remain uncovered and the budget is low,
+# it is allowed to close gracefully rather than force them.
+require_all_objectives_to_close: false

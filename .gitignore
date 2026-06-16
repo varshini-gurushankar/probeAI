@@ -1,0 +1,24 @@
+# Secrets — never commit real keys
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# ProbeAI generated output (local transcripts / highlights / eval runs)
+data/sessions/
+data/eval_runs/
+data/gq_store/
+*.jsonl
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Claude Code session data
+.claude/

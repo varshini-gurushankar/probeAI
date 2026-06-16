@@ -1,0 +1,81 @@
+# =============================================================================
+# ProbeAI sample study — the "discussion guide" the AI moderator works from.
+#
+# This mirrors Great Question's model: a researcher writes a research goal + a
+# set of prioritized objectives with seed questions, and the AI moderator uses
+# it as a FRAMEWORK, not a rigid script.
+#
+# To run a different study: copy this file, edit the fields below, and point
+# the app at it (PROBEAI_STUDY=path/to/your_study.yaml or --study on the CLI).
+# =============================================================================
+
+study_id: checkout-friction-2026-06
+title: "Mobile checkout & onboarding friction"
+
+# The one-sentence reason this study exists. The moderator is told to keep every
+# question in service of this goal.
+research_goal: >-
+  Understand where and why people experience friction in a mobile shopping
+  app's checkout and account-onboarding flow, so we can reduce abandonment.
+
+# A short, warm framing the moderator may adapt for its opening line.
+intro: >-
+  Thanks for joining. I'd love to hear about your recent experience shopping
+  and checking out on your phone. There are no right or wrong answers — I'm just
+  trying to understand what the experience was actually like for you.
+
+# Objectives = the things we must learn. priority drives how many follow-ups the
+# moderator may spend (see policy.yaml: probe_caps). Order is a suggestion, not a
+# script — the moderator adapts to what the participant brings up.
+objectives:
+  - id: abandon_moment
+    priority: high
+    label: "The moment they abandon checkout"
+    description: >-
+      Pinpoint the exact step/screen where the participant gives up or hesitates,
+      and what was happening right then.
+    seed_questions:
+      - "Tell me about the last time you started checking out on your phone but didn't finish. What happened?"
+      - "Walk me through the moment you decided to stop."
+
+  - id: payment_friction
+    priority: high
+    label: "Friction at the payment step"
+    description: >-
+      Understand specific pain at entering payment details, choosing a payment
+      method, or completing the transaction.
+    seed_questions:
+      - "When you got to the payment screen, what was that like?"
+      - "Was there anything about entering your payment details that slowed you down?"
+
+  - id: account_creation
+    priority: medium
+    label: "Account creation / onboarding expectations"
+    description: >-
+      Understand whether being asked to create an account or onboard matched
+      their expectations and how it affected their willingness to continue.
+    seed_questions:
+      - "Did the app ask you to create an account or sign in? How did that feel at that point?"
+
+  - id: trust_security
+    priority: medium
+    label: "Trust & security concerns"
+    description: >-
+      Surface any hesitation about sharing payment or personal info, or doubts
+      about whether the purchase would go through.
+    seed_questions:
+      - "Was there any moment you felt unsure about whether it was safe or would work?"
+
+  - id: device_context
+    priority: low
+    label: "Mobile/device context factors"
+    description: >-
+      Capture mobile-specific frustrations (small targets, autofill, switching
+      apps, connectivity) — useful but lowest priority if time runs short.
+    seed_questions:
+      - "Was there anything about doing this on a phone specifically that made it harder?"
+
+# A graceful close. The moderator adapts this when wrapping up.
+outro: >-
+  That's really helpful — thank you for walking me through all of that. Those
+  details are exactly what we needed.

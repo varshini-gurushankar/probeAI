@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ProbeAI — AI Moderated Interview</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">◐</span>
+      <div>
+        <h1>ProbeAI</h1>
+        <p class="tagline">AI Moderated Interviews — the reach of a survey with the depth of an interview</p>
+      </div>
+    </div>
+    <div class="study-meta">
+      <span id="study-title" class="study-title">…</span>
+      <span id="research-goal" class="research-goal"></span>
+    </div>
+  </header>
+
+  <main class="grid">
+    <!-- LEFT: live interview -->
+    <section class="panel interview">
+      <div class="panel-head">
+        <h2>Interview</h2>
+        <span id="turn-counter" class="pill">turn 0 / 0</span>
+      </div>
+
+      <div id="transcript" class="transcript" aria-live="polite">
+        <p class="empty">Press <strong>Start interview</strong> to begin. The moderator works
+          from the discussion guide as a framework — it probes vague answers, respects each
+          objective's priority, and wraps up when objectives are covered.</p>
+      </div>
+
+      <div id="rationale" class="rationale" hidden></div>
+
+      <!-- controls -->
+      <div class="controls">
+        <div class="control-row sim-row">
+          <label class="toggle">
+            <input type="checkbox" id="sim-toggle" />
+            <span>Simulate participant</span>
+          </label>
+          <select id="persona" class="persona" disabled>
+            <option value="realistic">Realistic shopper</option>
+            <option value="vague_oneword">Vague one-word answerer</option>
+            <option value="volunteers_ahead">Volunteers later-objective info</option>
+            <option value="offtopic_rambler">Off-topic rambler</option>
+            <option value="ideal_participant">Ideal participant</option>
+            <option value="uncooperative">Uncooperative "I don't know"</option>
+          </select>
+          <label class="toggle right">
+            <input type="checkbox" id="tts-toggle" checked />
+            <span>🔊 Speak</span>
+          </label>
+        </div>
+
+        <div class="control-row">
+          <textarea id="answer" rows="2" placeholder="Type the participant's answer, or use the mic…"></textarea>
+        </div>
+
+        <div class="control-row buttons">
+          <button id="start-btn" class="primary">Start interview</button>
+          <button id="mic-btn" class="ghost" disabled>🎤 Hold to speak</button>
+          <button id="send-btn" class="primary" disabled>Send answer</button>
+          <button id="sim-answer-btn" class="ghost" hidden>↻ Generate answer</button>
+        </div>
+        <p id="status" class="status"></p>
+      </div>
+    </section>
+
+    <!-- RIGHT: coverage + analysis -->
+    <section class="panel side">
+      <div class="panel-head"><h2>Objective coverage</h2></div>
+      <ul id="coverage" class="coverage"></ul>
+
+      <div class="panel-head wrap-actions">
+        <h2>Analysis</h2>
+        <div>
+          <label class="toggle small"><input type="checkbox" id="judge-toggle" /><span>use judge</span></label>
+          <button id="synth-btn" class="primary small" disabled>Synthesize</button>
+          <button id="eval-btn" class="ghost small" disabled>Run eval</button>
+        </div>
+      </div>
+      <div id="synthesis" class="analysis"></div>
+      <div id="eval" class="analysis"></div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

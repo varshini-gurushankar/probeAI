@@ -1,0 +1,48 @@
+# =============================================================================
+# Compact study used by the OFFLINE EVAL HARNESS (probeai.evals.run).
+#
+# Same domain as the full sample study, trimmed to 3 objectives so a full
+# 5-scenario harness run fits comfortably inside a tight Gemini free-tier daily
+# quota. The live demo uses the richer study_checkout.yaml; this one keeps the
+# eval cheap and fast without changing what's being measured.
+# =============================================================================
+
+study_id: checkout-friction-eval
+title: "Mobile checkout friction (eval)"
+
+research_goal: >-
+  Understand where and why people experience friction in a mobile shopping app's
+  checkout flow, so we can reduce abandonment.
+
+intro: >-
+  Thanks for joining — I'd love to hear about your recent mobile checkout experience.
+
+objectives:
+  - id: abandon_moment
+    priority: high
+    label: "The moment they abandon checkout"
+    description: >-
+      Pinpoint the exact step/screen where the participant gave up, and what was
+      happening right then.
+    seed_questions:
+      - "Tell me about the last time you started checking out on your phone but didn't finish. What happened?"
+
+  - id: payment_friction
+    priority: high
+    label: "Friction at the payment step"
+    description: >-
+      Understand specific pain entering payment details or completing the transaction.
+    seed_questions:
+      - "When you got to the payment screen, what was that like?"
+
+  - id: trust_security
+    priority: medium
+    label: "Trust & security concerns"
+    description: >-
+      Surface hesitation about sharing payment/personal info or doubts the purchase
+      would go through.
+    seed_questions:
+      - "Was there any moment you felt unsure about whether it was safe or would work?"
+
+outro: >-
+  That's really helpful — thank you for walking me through all of that.
