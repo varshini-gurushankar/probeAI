@@ -1,4 +1,4 @@
-# ProbeAI — an AI-moderated research interviewer that grades its own work
+# ProbeAI: an AI-moderated research interviewer that grades its own work
 
 ProbeAI is a small working demo I built for Great Question's AI engineering
 internship. It's a miniature of the AI Moderated Interviews feature that is included in the role's responsibilites: a moderator that runs a user-research interview from a discussion guide, asks follow-ups when an answer is thin, tracks how well it covered each objective, writes up the findings, and then scores how good the interview actually was.
