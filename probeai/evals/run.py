@@ -22,8 +22,8 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from ..agent_graph import make_session
 from ..llm import LLMError
-from ..moderator import InterviewSession, Moderator
 from ..participant import ScriptedParticipant, SimulatedParticipant
 from ..runner import run_interview
 from ..study_config import CONFIG_DIR, Policy, Study, load_policy, load_study
@@ -44,9 +44,15 @@ def _utf8_stdout() -> None:
 
 
 def _run_scenario_live(
-    scenario: Scenario, study: Study, policy: Policy, *, scripted: bool, lean: bool
+    scenario: Scenario,
+    study: Study,
+    policy: Policy,
+    *,
+    scripted: bool,
+    lean: bool,
+    moderator: str = "classic",
 ) -> RunData:
-    session = InterviewSession(study, policy, Moderator(study, policy, lean=lean))
+    session = make_session(study, policy, graph=moderator == "graph", lean=lean)
     participant = (
         ScriptedParticipant(scenario.script)
         if scripted
@@ -56,20 +62,24 @@ def _run_scenario_live(
     return RunData.capture(scenario.persona_id, session)
 
 
-def _cache_path(scenario_id: str) -> Path:
-    return CACHE_DIR / f"{scenario_id}.json"
+def _cache_path(scenario_id: str, moderator: str = "classic") -> Path:
+    # Graph runs are cached separately so they never overwrite the trusted classic cache.
+    suffix = "" if moderator == "classic" else f".{moderator}"
+    return CACHE_DIR / f"{scenario_id}{suffix}.json"
 
 
-def _load_cached(scenario_id: str) -> Optional[RunData]:
-    p = _cache_path(scenario_id)
+def _load_cached(scenario_id: str, moderator: str = "classic") -> Optional[RunData]:
+    p = _cache_path(scenario_id, moderator)
     if not p.exists():
         return None
     return RunData.from_dict(json.loads(p.read_text(encoding="utf-8")))
 
 
-def _save_cache(scenario_id: str, run: RunData) -> None:
+def _save_cache(scenario_id: str, run: RunData, moderator: str = "classic") -> None:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    _cache_path(scenario_id).write_text(json.dumps(run.to_dict(), indent=2), encoding="utf-8")
+    _cache_path(scenario_id, moderator).write_text(
+        json.dumps(run.to_dict(), indent=2), encoding="utf-8"
+    )
 
 
 def _hr(width: int = 78) -> str:
@@ -89,6 +99,13 @@ def main() -> None:
                         help="full LLM generation for every moderator line (more calls)")
     parser.add_argument("--use-cached", action="store_true", help="re-score saved runs (no LLM)")
     parser.add_argument("--scenario", default=None, help="run a single scenario id")
+    parser.add_argument(
+        "--moderator",
+        choices=["classic", "graph"],
+        default="classic",
+        help="moderator runtime: 'classic' (default, the trusted headline) or 'graph' "
+        "(LangGraph workflow with the validation/repair loop)",
+    )
     args = parser.parse_args()
 
     # Default to the compact eval study; scripted + lean keep the run cheap.
@@ -100,7 +117,7 @@ def main() -> None:
     judge = Judge() if args.judge else None
 
     mode = "cached" if args.use_cached else (
-        f"live · {'scripted' if scripted else 'persona'} · "
+        f"live · {args.moderator} · {'scripted' if scripted else 'persona'} · "
         f"{'lean' if lean else 'rich'} · {'judge' if judge else 'no-judge'}"
     )
     print(f"\nProbeAI offline eval — study: {study.title}")
@@ -113,9 +130,11 @@ def main() -> None:
     for s in scenarios:
         try:
             run = (
-                _load_cached(s.id)
+                _load_cached(s.id, args.moderator)
                 if args.use_cached
-                else _run_scenario_live(s, study, policy, scripted=scripted, lean=lean)
+                else _run_scenario_live(
+                    s, study, policy, scripted=scripted, lean=lean, moderator=args.moderator
+                )
             )
         except LLMError as exc:
             # Most likely free-tier quota — skip this scenario, keep partial results,
@@ -127,7 +146,7 @@ def main() -> None:
             print(f"  ! no cached run for '{s.id}' — run live once first; skipping")
             continue
         if not args.use_cached:
-            _save_cache(s.id, run)
+            _save_cache(s.id, run, args.moderator)
         runs[s.id] = run
         results.append(evaluate(s, run, policy))
 

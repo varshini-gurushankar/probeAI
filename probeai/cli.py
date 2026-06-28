@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .moderator import InterviewSession, Moderator
+from .agent_graph import make_session
 from .study_config import load_policy, load_study
 
 # Small status glyphs for the coverage panel.
@@ -45,11 +45,18 @@ def main() -> None:
         default=None,
         help="simulate the participant with this persona id (else you type)",
     )
+    parser.add_argument(
+        "--graph",
+        action="store_true",
+        help="use the LangGraph moderator runtime (validation/repair loop)",
+    )
     args = parser.parse_args()
 
     study = load_study(args.study)
     policy = load_policy(args.policy)
-    session = InterviewSession(study, policy, Moderator(study, policy))
+    session = make_session(study, policy, graph=args.graph)
+    if args.graph:
+        print("[graph mode] LangGraph moderator runtime\n")
 
     # Optional simulated participant (slice 2 module; imported lazily so slice-1
     # typed mode works without it).

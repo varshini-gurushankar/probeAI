@@ -6,6 +6,10 @@ google-genai>=1.0.0
 fastapi>=0.110.0
 uvicorn[standard]>=0.29.0
 
+# Agentic moderator runtime (graph workflow). LangGraph core only — no
+# LangChain LLM wrappers; the moderator keeps calling Gemini directly via llm.py.
+langgraph>=0.2,<2
+
 # Config + env
 PyYAML>=6.0
 python-dotenv>=1.0.0

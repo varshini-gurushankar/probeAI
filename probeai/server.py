@@ -23,10 +23,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import gq_mock
+from .agent_graph import make_session
 from .evals import metrics
 from .evals.judge import Judge
 from .llm import LLMError
-from .moderator import InterviewSession, Moderator
+from .moderator import InterviewSession
 from .participant import SimulatedParticipant
 from .study_config import load_policy, load_study
 from .synthesis import synthesize
@@ -59,6 +60,10 @@ state = _State()
 
 
 # --- request models ----------------------------------------------------------
+class StartIn(BaseModel):
+    graph: bool = False  # use the LangGraph moderator runtime for this session
+
+
 class TurnIn(BaseModel):
     answer: str
 
@@ -116,10 +121,11 @@ def _empty_coverage():
 
 
 @app.post("/api/start")
-def start():
+def start(body: StartIn | None = None):
+    use_graph = bool(body and body.graph)
     state.reset()
     try:
-        state.session = InterviewSession(state.study, state.policy, Moderator(state.study, state.policy))
+        state.session = make_session(state.study, state.policy, graph=use_graph)
         opening = state.session.start()
     except LLMError as exc:
         state.session = None
@@ -130,6 +136,7 @@ def start():
         "turns_used": 0,
         "turn_budget": state.session.turn_budget,
         "finished": False,
+        "moderator_runtime": "graph" if use_graph else "classic",
     }
 
 
@@ -156,6 +163,10 @@ def turn(body: TurnIn):
         "turns_used": result["turns_used"],
         "turn_budget": result["turn_budget"],
         "finished": result["finished"],
+        # Graph runtime exposes the per-node decision trace + validation result so a
+        # reviewer can inspect assess -> coverage -> decide -> validate -> repair.
+        "trace": result.get("trace"),
+        "validation": result.get("validation"),
     }
 
 

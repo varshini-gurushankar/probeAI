@@ -121,6 +121,26 @@ DIRECTIVE_CLOSE = (
     "done. You may adapt this closing line: \"{outro}\". Do not ask another question."
 )
 
+# Used by the LangGraph validation/repair loop: rewrite a flagged moderator
+# question into a clean one. The validator (deterministic heuristics) supplies the
+# concrete problems, so the model only has to fix them — not re-judge the question.
+MODERATOR_REPAIR = """\
+You wrote this question for a research participant, but it broke interview hygiene:
+
+  Question: "{question}"
+  Problems: {problems}
+
+The participant's last answer was:
+  "{answer}"
+
+Rewrite it as ONE question that:
+  - is open-ended and neutral (never leading, loaded, or presupposing a reaction),
+  - asks exactly one thing (no "and"/"or" stacking, no second question),
+  - stays grounded in what the participant actually said,
+  - keeps the original intent: {intent}
+
+Return only the rewritten question, nothing else."""
+
 
 # =============================================================================
 # PARTICIPANT (simulated persona — solo demo + eval harness)

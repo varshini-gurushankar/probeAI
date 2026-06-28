@@ -14,7 +14,8 @@ import argparse
 import sys
 from typing import Optional
 
-from .moderator import InterviewSession, Moderator
+from .agent_graph import make_session
+from .moderator import InterviewSession
 from .participant import SimulatedParticipant
 from .study_config import Policy, Study, load_policy, load_study
 
@@ -46,6 +47,9 @@ def run_interview(
         if verbose:
             d = result["decision"]
             print(f"  → {d.action.value}: {d.rationale}")
+            for entry in result.get("trace", []):  # graph mode only
+                reason = f" — {entry['reason']}" if entry["reason"] else ""
+                print(f"      · {entry['node']}: {entry['output']}{reason}")
             print(f"Moderator: {line}\n")
 
     return session
@@ -57,10 +61,11 @@ def run_simulated(
     policy: Optional[Policy] = None,
     *,
     verbose: bool = False,
+    graph: bool = False,
 ) -> InterviewSession:
     study = study or load_study()
     policy = policy or load_policy()
-    session = InterviewSession(study, policy, Moderator(study, policy))
+    session = make_session(study, policy, graph=graph)
     participant = SimulatedParticipant(study, persona_id)
     return run_interview(session, participant, verbose=verbose)
 
@@ -81,11 +86,18 @@ def main() -> None:
     parser.add_argument("--policy", default=None)
     parser.add_argument("--no-save", action="store_true", help="don't write the transcript")
     parser.add_argument("-v", "--verbose", action="store_true")
+    parser.add_argument(
+        "--graph",
+        action="store_true",
+        help="use the LangGraph moderator runtime (validation/repair loop + trace)",
+    )
     args = parser.parse_args()
 
     study = load_study(args.study)
     policy = load_policy(args.policy)
-    session = run_simulated(args.persona, study, policy, verbose=args.verbose)
+    session = run_simulated(
+        args.persona, study, policy, verbose=args.verbose, graph=args.graph
+    )
 
     print("\n=== interview complete ===")
     print(

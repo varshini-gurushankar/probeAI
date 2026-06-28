@@ -34,6 +34,7 @@ I kept the modules separate so each piece is testable on its own.
 | --- | --- |
 | `study_config.py` | Loads and validates the discussion guide (`config/study_checkout.yaml`) and the policy (`config/policy.yaml`). |
 | `moderator.py` | The engine: `assess` (LLM) → `decide_next_action` (pure, deterministic) → `generate` (LLM). I pulled the decision logic out of the LLM call so it can be unit-tested. |
+| `agent_graph.py` | A LangGraph version of the same turn, exposed as named nodes you can trace, with a validation/repair loop on top (see below). It reuses `moderator.py` as-is; you opt in with `--graph`. |
 | `coverage.py` | Per-objective state machine (uncovered / partial / covered) plus the evidence turns. Deterministic once it has a verdict. |
 | `transcript.py` | Speaker-attributed log, appended as it goes, saved to JSONL. |
 | `synthesis.py` | Findings summary and objective-linked highlights. Every quote is checked verbatim against a real participant turn so the synthesis can't invent one. |
@@ -58,6 +59,45 @@ These are baked into both the moderator prompt and the decision code:
 - One question at a time, and open/close the conversation cleanly.
 
 Everything tunable lives in `config/policy.yaml`.
+
+## LangGraph moderator runtime
+
+I also modeled the moderator turn as a LangGraph state machine, so the interview loop is
+explicit and inspectable instead of buried inside one method. The idea is agentic behavior with
+deterministic policy control: the LLM handles language judgment and natural question
+generation, while the deterministic code keeps owning coverage, follow-up caps, the turn
+budget, and when to stop.
+
+The classic engine (`InterviewSession.step`) runs a turn as a straight imperative sequence. The
+graph (`probeai/agent_graph.py`) runs the same turn as named nodes you can trace, and adds a
+validation/repair loop the classic path doesn't have. Every node reuses what's already there —
+`assess`, the pure `decide_next_action`, the coverage state machine, the leading/double-barreled
+heuristics — so no logic is duplicated or pushed into the LLM.
+
+```
+START
+ → assess_answer      (LLM)   read the answer → verdict
+ → update_coverage    (pure)  fold the verdict into the coverage state machine
+ → decide_action      (pure)  decide_next_action → PROBE / MOVE_ON / REDIRECT / WRAP
+     ├─ WRAP → synthesize ───────────────────────────────────────────→ END
+     └─ generate_question (LLM/template)   probe / move on / redirect
+         → validate_question  (deterministic: leading? double-barreled? off-topic?)
+             ├─ valid ─────────────────────────────────────────────────→ emit → END
+             ├─ invalid, repairs left → repair_question (LLM) → validate_question …
+             └─ invalid, exhausted    → safe generic fallback ──────────→ END
+```
+
+Before any question goes out, `validate_question` checks it (with the same heuristics the eval
+layer uses) for leading or loaded phrasing, asking two things at once, and basic relevance to
+the answer. That check is deterministic by default so evals stay cheap; the LLM judge is opt-in.
+If a question fails, `repair_question` rewrites it to be open, neutral, and single — up to two
+tries, then a safe generic fallback rather than shipping a bad question. Each node logs a small
+trace (node, input/output, reason) that shows up in `runner -v` and the web backend's `/api/turn`
+response.
+
+The five hand-labeled scenarios stay the trusted headline and still default to the classic
+runtime, so that number is unaffected. Pass `--moderator graph` to run the same scenarios
+through the graph for comparison.
 
 ## Decisions I made on purpose
 
@@ -141,9 +181,11 @@ uvicorn probeai.server:app --reload     # http://localhost:8000
 # 3b. Terminal demo
 python -m probeai.cli                                  # type answers yourself
 python -m probeai.runner --persona vague_oneword -v    # watch it probe a simulated participant
+python -m probeai.runner --persona vague_oneword --graph -v   # same, via the LangGraph runtime + trace
 
 # 4. Evals
-python -m probeai.evals.run
+python -m probeai.evals.run                  # classic runtime (the trusted headline)
+python -m probeai.evals.run --moderator graph   # same scenarios via the LangGraph runtime
 ```
 
 I made this with Claude Code as I was allowed to use AI to create a demo. If you have `ANTHROPIC_API_KEY` set, Claude Code will bill the paid API instead, so I kept it unset.
