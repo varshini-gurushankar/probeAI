@@ -1,8 +1,9 @@
 """Offline eval harness — one command, one clean report.
 
-    python -m probeai.evals.run                # run all 5 scenarios live + judge
-    python -m probeai.evals.run --no-judge     # skip the LLM judge (save quota)
-    python -m probeai.evals.run --use-cached   # re-score saved runs, no LLM calls
+    python -m probeai.evals.run                     # all 5 scenarios, graph runtime (default)
+    python -m probeai.evals.run --moderator classic # same scenarios, classic engine
+    python -m probeai.evals.run --judge             # add the isolated LLM judge (extra calls)
+    python -m probeai.evals.run --use-cached        # re-score saved runs, no LLM calls
     python -m probeai.evals.run --scenario vague_oneword
 
 Headline (the number to say on camera):
@@ -102,9 +103,10 @@ def main() -> None:
     parser.add_argument(
         "--moderator",
         choices=["classic", "graph"],
-        default="classic",
-        help="moderator runtime: 'classic' (default, the trusted headline) or 'graph' "
-        "(LangGraph workflow with the validation/repair loop)",
+        default="graph",
+        help="moderator runtime: 'graph' (default, the LangGraph workflow with the "
+        "validation/repair loop) or 'classic' (the imperative engine). Both are scored "
+        "against the same hand labels; runs cache separately so neither clobbers the other.",
     )
     args = parser.parse_args()
 

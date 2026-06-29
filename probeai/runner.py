@@ -61,7 +61,7 @@ def run_simulated(
     policy: Optional[Policy] = None,
     *,
     verbose: bool = False,
-    graph: bool = False,
+    graph: bool = True,
 ) -> InterviewSession:
     study = study or load_study()
     policy = policy or load_policy()
@@ -87,16 +87,18 @@ def main() -> None:
     parser.add_argument("--no-save", action="store_true", help="don't write the transcript")
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument(
-        "--graph",
+        "--classic",
         action="store_true",
-        help="use the LangGraph moderator runtime (validation/repair loop + trace)",
+        help="use the classic imperative engine instead of the default LangGraph runtime "
+        "(no per-node trace)",
     )
     args = parser.parse_args()
 
     study = load_study(args.study)
     policy = load_policy(args.policy)
+    # Graph is the default runtime; --classic opts back into the imperative engine.
     session = run_simulated(
-        args.persona, study, policy, verbose=args.verbose, graph=args.graph
+        args.persona, study, policy, verbose=args.verbose, graph=not args.classic
     )
 
     print("\n=== interview complete ===")

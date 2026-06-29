@@ -95,9 +95,13 @@ tries, then a safe generic fallback rather than shipping a bad question. Each no
 trace (node, input/output, reason) that shows up in `runner -v` and the web backend's `/api/turn`
 response.
 
-The five hand-labeled scenarios stay the trusted headline and still default to the classic
-runtime, so that number is unaffected. Pass `--moderator graph` to run the same scenarios
-through the graph for comparison.
+The graph is now the **default** runtime everywhere — CLI, runner, web, and the eval
+harness. The five hand-labeled scenarios stay the trusted headline and behave identically
+under both runtimes (verified before/after the switch), so that number is unaffected; pass
+`--moderator classic` to run the same scenarios through the classic engine for comparison.
+
+For a full walk-through of the turn — every node, what flows through the state, and what
+LangGraph does and doesn't buy this design — see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Decisions I made on purpose
 
@@ -178,14 +182,14 @@ cp .env.example .env        # then set GEMINI_API_KEY=
 # 3a. Web app (voice + UI)
 uvicorn probeai.server:app --reload     # http://localhost:8000
 
-# 3b. Terminal demo
-python -m probeai.cli                                  # type answers yourself
-python -m probeai.runner --persona vague_oneword -v    # watch it probe a simulated participant
-python -m probeai.runner --persona vague_oneword --graph -v   # same, via the LangGraph runtime + trace
+# 3b. Terminal demo (LangGraph runtime by default)
+python -m probeai.cli                                    # type answers yourself
+python -m probeai.runner --persona vague_oneword -v      # watch it probe, with the per-node trace
+python -m probeai.runner --persona vague_oneword --classic -v   # same, via the classic engine (no trace)
 
-# 4. Evals
-python -m probeai.evals.run                  # classic runtime (the trusted headline)
-python -m probeai.evals.run --moderator graph   # same scenarios via the LangGraph runtime
+# 4. Evals (LangGraph runtime by default)
+python -m probeai.evals.run                     # the trusted 5-scenario headline
+python -m probeai.evals.run --moderator classic # same scenarios via the classic engine
 ```
 
 I made this with Claude Code as I was allowed to use AI to create a demo. If you have `ANTHROPIC_API_KEY` set, Claude Code will bill the paid API instead, so I kept it unset.

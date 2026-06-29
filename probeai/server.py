@@ -37,6 +37,17 @@ WEB_DIR = Path(__file__).parent / "web"
 app = FastAPI(title="ProbeAI", version="0.1.0")
 
 
+@app.middleware("http")
+async def _no_cache_static(request, call_next):
+    """Local demo: never let the browser cache the front end, so edits to
+    app.js / styles.css / index.html show up on a normal reload instead of a
+    stale copy. (Harmless for the JSON API; only the static assets matter.)"""
+    response = await call_next(request)
+    if request.url.path in ("/", "/app.js", "/styles.css", "/index.html"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 class _State:
     """Holds the single active interview session for this local demo."""
 
@@ -61,7 +72,7 @@ state = _State()
 
 # --- request models ----------------------------------------------------------
 class StartIn(BaseModel):
-    graph: bool = False  # use the LangGraph moderator runtime for this session
+    graph: bool = True  # LangGraph runtime is the default; pass {"graph": false} for classic
 
 
 class TurnIn(BaseModel):
@@ -122,7 +133,8 @@ def _empty_coverage():
 
 @app.post("/api/start")
 def start(body: StartIn | None = None):
-    use_graph = bool(body and body.graph)
+    # Graph is the default runtime; an explicit {"graph": false} opts into classic.
+    use_graph = body.graph if body else True
     state.reset()
     try:
         state.session = make_session(state.study, state.policy, graph=use_graph)

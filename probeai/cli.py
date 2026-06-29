@@ -46,17 +46,21 @@ def main() -> None:
         help="simulate the participant with this persona id (else you type)",
     )
     parser.add_argument(
-        "--graph",
+        "--classic",
         action="store_true",
-        help="use the LangGraph moderator runtime (validation/repair loop)",
+        help="use the classic imperative engine instead of the default LangGraph runtime",
     )
     args = parser.parse_args()
 
     study = load_study(args.study)
     policy = load_policy(args.policy)
-    session = make_session(study, policy, graph=args.graph)
-    if args.graph:
-        print("[graph mode] LangGraph moderator runtime\n")
+    # Graph is the default runtime; --classic opts back into the imperative engine.
+    session = make_session(study, policy, graph=not args.classic)
+    print(
+        "[classic mode] imperative InterviewSession.step\n"
+        if args.classic
+        else "[graph mode] LangGraph moderator runtime\n"
+    )
 
     # Optional simulated participant (slice 2 module; imported lazily so slice-1
     # typed mode works without it).

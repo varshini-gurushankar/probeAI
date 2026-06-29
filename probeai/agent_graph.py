@@ -53,38 +53,44 @@ DEFAULT_MAX_REPAIRS = 2
 # STATE
 # =============================================================================
 class InterviewGraphState(TypedDict, total=False):
-    """Everything one turn needs. ``trace`` accumulates across nodes (add-reducer).
+    """Everything one turn needs, plus a record of how it got there.
 
-    The first block are live references shared across the whole interview (the graph
-    mutates ``coverage``/``transcript`` in place, exactly as the classic engine does);
-    the rest is per-turn working data.
+    Two blocks. The first are live references shared across the whole interview — the
+    graph mutates ``coverage``/``transcript`` in place, exactly as the classic engine
+    does, so identity is stable turn to turn. The second is per-turn working data; each
+    field's comment names the node that *writes* it, so you can read the state object and
+    know exactly where every value comes from.
+
+    ``trace`` is special: it uses an add-reducer (``operator.add``), so every node can
+    append its own one-line record without overwriting earlier nodes — that's what makes
+    the whole turn inspectable end to end.
     """
 
-    # shared references (set once per turn from the session)
-    study: Study
-    policy: Policy
-    transcript: Transcript
-    moderator: Moderator
-    coverage: CoverageState
-    judge: Optional[Any]  # optional evals.judge.Judge for a richer validation pass
-    use_judge: bool
+    # --- shared references (seeded once per turn from the live session) -------------
+    study: Study                      # the discussion guide + objectives
+    policy: Policy                    # follow-up caps, turn budget, stop rules
+    transcript: Transcript            # speaker-attributed log (mutated in place)
+    moderator: Moderator              # owns assess() / generate() / the LLM handle
+    coverage: CoverageState           # per-objective state machine (mutated in place)
+    judge: Optional[Any]              # optional evals.judge.Judge for a richer validation pass
+    use_judge: bool                   # opt-in to the LLM judge in validation (default off)
 
-    # per-turn working data
-    answer: str
-    answer_turn_id: int
-    current_objective_id: Optional[str]
-    verdict: Verdict
-    decision: Decision
-    question: str
-    validation: dict  # {"valid": bool, "reasons": [str, ...]}
-    repair_attempts: int
-    max_repairs: int
-    fallback_used: bool
-    turns_used: int
-    turn_budget: int
-    should_wrap: bool
-    final_summary: Optional[str]
-    trace: Annotated[List[dict], operator.add]
+    # --- per-turn working data (← the node that writes it) --------------------------
+    answer: str                       # ← seeded: the participant's latest utterance
+    answer_turn_id: int               # ← seeded: transcript id of that answer (for evidence)
+    current_objective_id: Optional[str]  # ← seeded; rewritten by decide_action (on ASK_NEXT)
+    verdict: Verdict                  # ← assess_answer_node  (status + is_specific + gap)
+    decision: Decision                # ← decide_action_node  (PROBE/ASK_NEXT/STEER_BACK/CLOSE)
+    question: str                     # ← generate/repair/fallback/synthesize (the line to emit)
+    validation: dict                  # ← validate_question_node  {"valid": bool, "reasons": [...]}
+    repair_attempts: int              # ← repair_question_node  (incremented per rewrite)
+    max_repairs: int                  # ← seeded: hard cap on repair rewrites (default 2)
+    fallback_used: bool               # ← fallback_node  (True iff repair was exhausted)
+    turns_used: int                   # ← seeded: participant turns so far (drives the budget)
+    turn_budget: int                  # ← seeded: max participant turns for this study
+    should_wrap: bool                 # ← decide_action_node (CLOSE) / synthesize_node
+    final_summary: Optional[str]      # ← synthesize_node  (the closing line)
+    trace: Annotated[List[dict], operator.add]  # ← every node appends one record (add-reducer)
 
 
 # =============================================================================
@@ -317,10 +323,25 @@ def synthesize_node(state: InterviewGraphState) -> dict:
 # ROUTING
 # =============================================================================
 def _route_after_decide(state: InterviewGraphState) -> str:
+    """CLOSE wraps the interview (no question needed); everything else generates one."""
     return "synthesize" if state["decision"].action is Action.CLOSE else "generate_question"
 
 
 def _route_after_validate(state: InterviewGraphState) -> str:
+    """The repair loop's exit logic — and the reason it always terminates.
+
+    Three outcomes, checked in order:
+      1. clean question                  -> emit (END)
+      2. flagged, repair budget remains  -> repair_question (rewrite, then re-validate)
+      3. flagged, repair budget spent    -> fallback (safe generic question, then END)
+
+    The loop is bounded by ``max_repairs`` (default 2): repair_question increments
+    ``repair_attempts`` every pass, so after at most two rewrites this returns "fallback"
+    instead of "repair_question". A model that keeps producing leading questions can
+    therefore never loop forever and never ships a bad line — worst case it emits the
+    neutral GENERIC_FALLBACK. Bounding it also caps the LLM cost of a turn at 2 extra
+    calls.
+    """
     if state["validation"]["valid"]:
         return "emit"
     if state["repair_attempts"] >= state["max_repairs"]:
@@ -332,7 +353,12 @@ def _route_after_validate(state: InterviewGraphState) -> str:
 # GRAPH CONSTRUCTION
 # =============================================================================
 def build_interview_graph():
-    """Build and compile the per-turn interview graph."""
+    """Build and compile the per-turn interview graph.
+
+    Read the edges below top-to-bottom and you have the whole turn: assess the answer,
+    fold it into coverage, decide the move, then either wrap up or generate→validate
+    (→repair→fallback) a question before emitting it.
+    """
     g = StateGraph(InterviewGraphState)
     g.add_node("assess_answer", assess_answer_node)
     g.add_node("update_coverage", update_coverage_node)
@@ -343,21 +369,35 @@ def build_interview_graph():
     g.add_node("fallback", fallback_node)
     g.add_node("synthesize", synthesize_node)
 
+    # Straight-line spine: read the answer → update coverage → decide the next move.
     g.set_entry_point("assess_answer")
     g.add_edge("assess_answer", "update_coverage")
     g.add_edge("update_coverage", "decide_action")
+
+    # Fork 1 — wrap vs. continue. CLOSE means every objective is covered or the budget
+    # is spent, so we skip question generation entirely and go straight to the closing
+    # line; any other action needs a question.
     g.add_conditional_edges(
         "decide_action",
         _route_after_decide,
         {"generate_question": "generate_question", "synthesize": "synthesize"},
     )
+
+    # Every generated (or repaired) question passes through the same quality gate.
     g.add_edge("generate_question", "validate_question")
+
+    # Fork 2 — the question quality gate (the loop). valid → emit (END); flagged but
+    # repairs remain → rewrite and re-validate; flagged and repairs exhausted → swap in a
+    # safe generic question. This is the only cycle in the graph, and it is bounded
+    # (see _route_after_validate) so it can never spin forever.
     g.add_conditional_edges(
         "validate_question",
         _route_after_validate,
         {"emit": END, "repair_question": "repair_question", "fallback": "fallback"},
     )
-    g.add_edge("repair_question", "validate_question")
+    g.add_edge("repair_question", "validate_question")  # re-validate every rewrite
+
+    # Terminal edges — both fallback (bad question replaced) and synthesize (wrap-up) end.
     g.add_edge("fallback", END)
     g.add_edge("synthesize", END)
     return g.compile()

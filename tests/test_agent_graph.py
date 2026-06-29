@@ -229,3 +229,73 @@ def test_graph_session_runs_full_scripted_interview(study, policy):
     assert session.finished is True
     assert session.turn_log  # produced per-turn records
     assert all("trace" in entry for entry in session.turn_log)
+
+
+# --- classic vs. graph behavioral parity (the eval-trust guarantee, offline) -
+class _ParityModerator:
+    """Deterministic moderator (no LLM): the verdict depends only on the answer text, so
+    the classic engine and the graph receive identical assessments and must therefore
+    make identical decisions. ``generate`` references the objective so the graph's
+    validation passes cleanly (no repair) — isolating the runtime, not the wording.
+    """
+
+    def __init__(self, study, policy):
+        self.study = study
+        self.policy = policy
+        self.llm = _FakeLLM("Could you walk me through objective a_high in more depth?")
+
+    def assess(self, answer, current_objective_id, history) -> Verdict:
+        specific = len(answer.split()) >= 6  # longer answers read as substantive
+        return Verdict(
+            current_objective_id=current_objective_id,
+            status=AnswerVerdict.covered if specific else AnswerVerdict.partial,
+            is_specific=specific,
+            gap="specifics",
+        )
+
+    def generate(self, decision, history) -> str:
+        oid = decision.target_objective_id
+        label = self.study.objective(oid).label if oid else "this topic"
+        return f"Could you describe {label.lower()} in a bit more depth?"
+
+
+def _behavior(session) -> dict:
+    """The signals the eval scenarios actually score — wording deliberately excluded."""
+    return {
+        "actions": [e["action"] for e in session.turn_log],
+        "verdicts": [e["verdict_status"] for e in session.turn_log],
+        "finished": session.finished,
+        "participant_turns": session.participant_turns,
+        "coverage": {c["objective_id"]: c["status"] for c in session.coverage.snapshot()},
+        "probes": {c["objective_id"]: c["probes_used"] for c in session.coverage.snapshot()},
+        "covered_count": session.coverage.covered_count,
+    }
+
+
+def test_classic_and_graph_are_behaviorally_identical(study, policy):
+    """The eval-trust guarantee, proven without the LLM: the same scripted interview run
+    through the classic engine and through the graph produces the *same behavior* —
+    identical action sequence, coverage, probe counts, and termination. The graph only
+    adds a question-wording gate on top of an unchanged decision path.
+    """
+    from probeai.moderator import InterviewSession
+    from probeai.participant import ScriptedParticipant
+    from probeai.runner import run_interview
+
+    # A mix of thin and substantive answers to exercise PROBE, ASK_NEXT and CLOSE.
+    script = [
+        "yeah",
+        "it crashed at the payment screen after Apple Pay failed twice in a row",
+        "nope",
+        "the saved-cart flow is what finally let me finish the order properly",
+        "meh",
+        "honestly the whole thing felt smooth once the cart persisted between sessions",
+    ]
+
+    classic = InterviewSession(study, policy, _ParityModerator(study, policy))
+    run_interview(classic, ScriptedParticipant(list(script)))
+
+    graph = GraphInterviewSession(study, policy, _ParityModerator(study, policy))
+    run_interview(graph, ScriptedParticipant(list(script)))
+
+    assert _behavior(graph) == _behavior(classic)

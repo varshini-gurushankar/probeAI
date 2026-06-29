@@ -91,17 +91,54 @@ if (SR) {
     for (let i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript;
     els.answer.value = txt;
   };
-  recog.onerror = (e) => setStatus("mic error: " + e.error);
+  // diagnostics: tells us how far the pipeline gets (mic → audio → speech → text)
+  recog.onaudiostart = () => setStatus("Mic live — speak now, then release.");
+  recog.onspeechstart = () => setStatus("Hearing you…");
+  recog.onnomatch = () => setStatus("Heard audio but couldn't transcribe it — try Chrome, or speak more clearly.");
+  recog.onerror = (e) => {
+    listening = false; els.mic.classList.remove("listening"); els.mic.textContent = "🎤 Hold to speak";
+    const msg = {
+      "not-allowed": "Mic blocked — click the 🔒 (or mic) icon in Chrome's address bar → Allow → reload.",
+      "service-not-allowed": "Mic blocked by the browser — allow microphone access and reload.",
+      "no-speech": "Didn't catch any speech — hold the button, speak, then release.",
+      "audio-capture": "No microphone found — check it's plugged in and set as default in Windows sound settings.",
+      "network": "Speech service couldn't reach the network — check your internet connection.",
+      "aborted": "",
+    }[e.error] ?? ("mic error: " + e.error);
+    if (msg) setStatus(msg);
+  };
   recog.onend = () => { listening = false; els.mic.classList.remove("listening"); els.mic.textContent = "🎤 Hold to speak"; };
 } else {
   els.mic.title = "Web Speech API not supported in this browser — use Chrome, or type.";
 }
 
-function startListening() {
+// Pre-flight the microphone once so a denied/missing/busy device gives a clear,
+// actionable error up front instead of SpeechRecognition silently yielding no text.
+let micGranted = false;
+async function ensureMic() {
+  if (micGranted || !navigator.mediaDevices?.getUserMedia) return true;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach((t) => t.stop());  // we only needed the permission grant
+    micGranted = true;
+    return true;
+  } catch (err) {
+    setStatus({
+      NotAllowedError: "Mic permission denied — click the 🔒 icon left of the URL → Microphone → Allow, then reload.",
+      NotFoundError: "No microphone detected — plug one in or pick a default mic in Windows sound settings.",
+      NotReadableError: "Mic is busy in another app — close Zoom/Teams/etc., then try again.",
+    }[err.name] ?? ("Mic unavailable: " + err.name));
+    return false;
+  }
+}
+
+async function startListening() {
   if (!recog || listening || finished) return;
+  window.speechSynthesis?.cancel();  // stop TTS so the mic doesn't pick it up
+  if (!(await ensureMic()) || listening || finished) return;  // re-check after the await
   els.answer.value = "";
   try { recog.start(); listening = true; els.mic.classList.add("listening"); els.mic.textContent = "● listening…"; setStatus("Listening — release to stop."); }
-  catch (_) {}
+  catch (_) { setStatus("mic unavailable — try releasing and holding again"); }
 }
 function stopListening() {
   if (!recog || !listening) return;
