@@ -171,7 +171,3 @@ A few I went back and forth on:
 I built this for Great Question specifically — rather than something generic — to take two of the role's challenges (the agentic moderator and the evals) and show I could build toward them and reason about how they'd fit the product. `gq_mock.py` is the stand-in for the real API: the moderator loop is the AI Moderated Interviews feature, and the eval harness is the more transferable asset — a way to regression-test moderator quality as prompts and models change.
 
 ---
-
-## A note on AI use
-
-I built this with Claude Code, as the brief allowed using AI to create the demo. 
